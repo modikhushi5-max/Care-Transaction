@@ -102,14 +102,23 @@ def line_chart(data: pd.DataFrame, y: str, title: str, color: str = "#0b6e8a") -
     return fig
 
 
-def metric_value(metric: str, data: pd.DataFrame) -> tuple[str, str | None]:
-    """Format values for KPI cards without altering notebook aggregations."""
-    value = data[metric].mean() if metric != "Backlog" else data[metric].mean()
-    if metric in {"Transfer Efficiency Ratio", "Discharge Effectiveness", "Pipeline Throughput"}:
-        return f"{value:.1%}", "Average for selected period"
+def metric_value(metric, data):
     if metric == "Outcome Stability Score":
-        return f"{data[DISCHARGED].std():.2f}", "Std. dev. of daily discharges"
-    return f"{value:,.0f}", "Average daily backlog"
+        value = data["Children discharged from HHS Care"].std()
+        display = f"{value:.2f}"
+        help_text = "Standard deviation of daily HHS discharge outcomes."
+    
+    elif metric == "Backlog":
+        value = data["Backlog"].mean()
+        display = f"{value:.2f}"
+        help_text = "Average backlog based on the selected date range."
+    
+    else:
+        value = data[metric].mean()
+        display = f"{value:.2f}"
+        help_text = ""
+
+    return display, help_text
 
 
 def main() -> None:

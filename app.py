@@ -34,8 +34,28 @@ def apply_theme() -> None:
         """
         <style>
         .stApp { background: #f5f8fb; }
-        section[data-testid="stSidebar"] { background: #093b5a; }
-        section[data-testid="stSidebar"] * { color: #ffffff; }
+        section[data-testid="stSidebar"] { background: linear-gradient(180deg, #073b5c 0%, #0b4d70 52%, #06334e 100%); }
+        section[data-testid="stSidebar"] [data-testid="stSidebarContent"] { padding: .7rem .85rem 2rem; }
+        section[data-testid="stSidebar"] { color: #ffffff; }
+        section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+        section[data-testid="stSidebar"] .stRadio label,
+        section[data-testid="stSidebar"] [data-testid="stExpander"] summary,
+        section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: #ffffff !important; }
+        section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p { color: #dceef6; font-size: .80rem; font-weight: 650; }
+        section[data-testid="stSidebar"] [data-testid="stSelectbox"] > div, section[data-testid="stSidebar"] [data-testid="stDateInput"] input, section[data-testid="stSidebar"] [data-testid="stNumberInput"] input { background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.27); border-radius: 8px; }
+        section[data-testid="stSidebar"] hr { border-color: rgba(255,255,255,.18); margin: 1rem 0; }
+        /* Keep selected values legible on the light input controls. */
+        section[data-testid="stSidebar"] [data-baseweb="select"] *,
+        section[data-testid="stSidebar"] [data-baseweb="input"] input,
+        section[data-testid="stSidebar"] [data-testid="stDateInput"] input { color: #123247 !important; }
+        section[data-testid="stSidebar"] [data-baseweb="select"] > div,
+        section[data-testid="stSidebar"] [data-testid="stDateInput"] input { background: #ffffff !important; }
+        [data-baseweb="popover"] [role="option"],
+        [data-baseweb="popover"] [role="option"] * { color: #123247 !important; }
+        .sidebar-header { border-left: 3px solid #67d3dd; padding: .25rem 0 .25rem .7rem; margin: .2rem 0 1.1rem; }
+        .sidebar-eyebrow { color: #9dd7eb; font-size: .69rem; letter-spacing: .13em; font-weight: 700; }
+        .sidebar-title { color: white; font-size: 1.25rem; font-weight: 750; line-height: 1.15; margin-top: .16rem; }
+        .sidebar-section { color: #9dd7eb; font-size: .70rem; letter-spacing: .12em; font-weight: 750; margin: .7rem 0 .35rem; }
         .block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
         [data-testid="stMetric"] {
             background: #ffffff; border: 1px solid #d9e4ec; border-radius: 12px;
@@ -102,23 +122,15 @@ def line_chart(data: pd.DataFrame, y: str, title: str, color: str = "#0b6e8a") -
     return fig
 
 
-def metric_value(metric, data):
+def metric_value(metric: str, data: pd.DataFrame) -> tuple[str, str | None]:
+    """Format values for KPI cards without altering notebook aggregations."""
     if metric == "Outcome Stability Score":
-        value = data["Children discharged from HHS Care"].std()
-        display = f"{value:.2f}"
-        help_text = "Standard deviation of daily HHS discharge outcomes."
-    
-    elif metric == "Backlog":
-        value = data["Backlog"].mean()
-        display = f"{value:.2f}"
-        help_text = "Average backlog based on the selected date range."
-    
-    else:
-        value = data[metric].mean()
-        display = f"{value:.2f}"
-        help_text = ""
+        return f"{data[DISCHARGED].std():.2f}", "Std. dev. of daily discharges"
 
-    return display, help_text
+    value = data[metric].mean()
+    if metric in {"Transfer Efficiency Ratio", "Discharge Effectiveness", "Pipeline Throughput"}:
+        return f"{value:.1%}", "Average for selected period"
+    return f"{value:,.0f}", "Average daily backlog"
 
 
 def main() -> None:
@@ -138,23 +150,50 @@ def main() -> None:
         st.exception(error)
         return
 
-    st.sidebar.header("Dashboard Filters")
+    st.sidebar.markdown("""<div class="sidebar-header"><div class="sidebar-eyebrow">CARE OPERATIONS</div><div class="sidebar-title">Dashboard Controls</div></div>""", unsafe_allow_html=True)
+    st.sidebar.markdown("<div class='sidebar-section'>FILTER SETTINGS</div>", unsafe_allow_html=True)
     min_date, max_date = df["Date"].min().date(), df["Date"].max().date()
-    date_range = st.sidebar.date_input("Date range", value=(min_date, max_date), min_value=min_date, max_value=max_date)
-    months = st.sidebar.multiselect("Month", options=list(range(1, 13)), default=list(range(1, 13)), format_func=lambda m: pd.Timestamp(2000, m, 1).month_name())
+    date_range = st.sidebar.date_input(
+        "Date range",
+        value=(min_date, max_date),
+        min_value=min_date,
+        max_value=max_date,
+        format="DD/MM/YYYY",
+        key="date_range_calendar_v2",
+    )
+    selected_month = st.sidebar.selectbox("Month", ["All months"] + list(range(1, 13)), index=0, key="month_dropdown_v2", format_func=lambda month: month if isinstance(month, str) else pd.Timestamp(2000, month, 1).month_name())
     day_type = st.sidebar.radio("Weekday / Weekend", ["All", "Weekday", "Weekend"], horizontal=True)
-    selected_kpi = st.sidebar.selectbox("KPI metric toggle", ["Transfer Efficiency Ratio", "Discharge Effectiveness", "Pipeline Throughput", "Backlog"])
+    selected_kpi = st.sidebar.selectbox("KPI metric toggle", ["Transfer Efficiency Ratio", "Discharge Effectiveness", "Pipeline Throughput", "Backlog"], index=0, key="kpi_metric_toggle_v2")
+    st.sidebar.divider()
+    with st.sidebar.expander("Alert thresholds", expanded=False):
+        transfer_threshold = st.number_input("Low transfer efficiency", min_value=0.0, max_value=1.0, value=0.50, step=0.01, format="%.2f")
+        discharge_threshold = st.number_input("Low discharge effectiveness", min_value=0.0, max_value=1.0, value=0.02, step=0.01, format="%.2f")
+        backlog_threshold = st.number_input("High backlog", value=float(df["Backlog"].mean()), step=1.0)
 
     if len(date_range) != 2:
         st.warning("Select both a start and end date to view the dashboard.")
         return
     start_date, end_date = pd.Timestamp(date_range[0]), pd.Timestamp(date_range[1])
-    filtered = df[(df["Date"] >= start_date) & (df["Date"] <= end_date) & df["Month_Num"].isin(months)].copy()
+    filtered = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)].copy()
+    if selected_month != "All months":
+        filtered = filtered[filtered["Month_Num"] == selected_month]
     if day_type != "All":
         filtered = filtered[filtered["Day_Type"] == day_type]
     if filtered.empty:
         st.warning("No records match the selected filters.")
         return
+
+    trend_export_columns = [
+        "Date", APPREHENDED, CBP_CUSTODY, TRANSFERRED, HHS_CARE, DISCHARGED,
+        "Transfer Efficiency Ratio", "Discharge Effectiveness", "Pipeline Throughput", "Backlog",
+    ]
+    st.download_button(
+        "Download filtered trend data (CSV)",
+        data=filtered[trend_export_columns].to_csv(index=False).encode("utf-8"),
+        file_name="care_transition_filtered_trends.csv",
+        mime="text/csv",
+        help="Downloads the data used by the dashboard charts for the current filters.",
+    )
 
     cards = ["Transfer Efficiency Ratio", "Discharge Effectiveness", "Pipeline Throughput", "Backlog", "Outcome Stability Score"]
     for column, metric in zip(st.columns(5), cards):
@@ -162,16 +201,31 @@ def main() -> None:
         column.metric(metric, display, help=help_text)
 
     st.divider()
+    st.subheader("Selected KPI Trend")
+    kpi_colors = {
+        "Transfer Efficiency Ratio": "#007c91",
+        "Discharge Effectiveness": "#3c7d45",
+        "Pipeline Throughput": "#5b5bd6",
+        "Backlog": "#c65102",
+    }
+    selected_kpi_fig = line_chart(filtered, selected_kpi, f"{selected_kpi} Trend", kpi_colors[selected_kpi])
+    if selected_kpi != "Backlog":
+        selected_kpi_fig.update_yaxes(tickformat=".0%")
+    st.plotly_chart(selected_kpi_fig, use_container_width=True, config={"displaylogo": False, "displayModeBar": True})
+
     st.subheader("Daily Trends")
+    st.caption("Hover over a chart and use the camera icon in the toolbar to download it as a PNG.")
     trend_specs = [(APPREHENDED, "Daily Apprehension Trend"), (CBP_CUSTODY, "CBP Custody Trend"), (HHS_CARE, "HHS Care Trend"), (DISCHARGED, "Daily Discharge Trend")]
     for left, right in zip(trend_specs[::2], trend_specs[1::2]):
         col1, col2 = st.columns(2)
-        col1.plotly_chart(line_chart(filtered, *left), use_container_width=True)
-        col2.plotly_chart(line_chart(filtered, *right), use_container_width=True)
+        chart_config = {"displaylogo": False, "displayModeBar": True, "toImageButtonOptions": {"format": "png", "scale": 2}}
+        col1.plotly_chart(line_chart(filtered, *left), use_container_width=True, config=chart_config)
+        col2.plotly_chart(line_chart(filtered, *right), use_container_width=True, config=chart_config)
 
     st.subheader("Care Pipeline Flow")
     pipeline = pd.DataFrame({"Stage": ["Children Apprehended", "Children in CBP Custody", "Transferred to HHS", "Children in HHS Care", "Children Discharged"], "Average Count": [filtered[APPREHENDED].mean(), filtered[CBP_CUSTODY].mean(), filtered[TRANSFERRED].mean(), filtered[HHS_CARE].mean(), filtered[DISCHARGED].mean()]})
-    flow = px.funnel(pipeline, x="Average Count", y="Stage", color="Average Count", color_continuous_scale="Blues", title="Average Care Pipeline Flow")
+    flow = px.funnel(pipeline, x="Average Count", y="Stage", title="Average Care Pipeline Flow")
+    flow.update_traces(marker=dict(color="#0b6e8a"))
     flow.update_layout(template="plotly_white", margin=dict(l=15, r=15, t=50, b=15), coloraxis_showscale=False)
     st.plotly_chart(flow, use_container_width=True)
 
@@ -196,14 +250,14 @@ def main() -> None:
     col1.plotly_chart(rolling_fig, use_container_width=True)
     col2.plotly_chart(line_chart(filtered, "Rolling Std", "Rolling Standard Deviation", "#8e4d92"), use_container_width=True)
 
-    st.subheader("Alerts")
-    high_backlog = filtered["Backlog"] > filtered["Backlog"].mean()
-    low_transfer = filtered["Transfer Efficiency Ratio"] < filtered["Transfer Efficiency Ratio"].mean()
-    low_discharge = filtered["Discharge Effectiveness"] < filtered["Discharge Effectiveness"].mean()
+    st.subheader("Threshold-based Alerts")
+    high_backlog = filtered["Backlog"] > backlog_threshold
+    low_transfer = filtered["Transfer Efficiency Ratio"] < transfer_threshold
+    low_discharge = filtered["Discharge Effectiveness"] < discharge_threshold
     a, b, c = st.columns(3)
-    a.warning(f"High Backlog Alert: {high_backlog.sum()} selected days above the selected-period average.")
-    b.warning(f"Low Transfer Efficiency Alert: {low_transfer.sum()} selected days below the selected-period average.")
-    c.warning(f"Low Discharge Effectiveness Alert: {low_discharge.sum()} selected days below the selected-period average.")
+    a.warning(f"High Backlog: {high_backlog.sum()} day(s) above {backlog_threshold:,.0f}.")
+    b.warning(f"Low Transfer Efficiency: {low_transfer.sum()} day(s) below {transfer_threshold:.0%}.")
+    c.warning(f"Low Discharge Effectiveness: {low_discharge.sum()} day(s) below {discharge_threshold:.0%}.")
 
     st.subheader("Exception Tables")
     increase = filtered[filtered["Discharge Change (%)"] > 20][["Date", "Previous Discharge", DISCHARGED, "Discharge Change (%)"]]
